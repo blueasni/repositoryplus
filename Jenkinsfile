@@ -2,29 +2,57 @@ pipeline {
     agent any
 
     environment {
-        // Replace with your Docker Hub username and repository name
         DOCKER_IMAGE = "blueasni/repositoryplus"
         DOCKER_HUB_CREDS = credentials('docker_secret')
     }
 
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
     stages {
         stage('Checkout') {
-        steps {
+            steps {
                 checkout scm
             }
         }
 
-        stage('Maven Build') {
+        stage('Build') {
             steps {
-              sh 'mvn clean package -DskipTests'
+                sh 'mvn clean package'
+            }
+            post {
+                success {
+                    echo 'Build successful!'
+                }
+                failure {
+                    error 'Build failed!'
+                }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh 'mvn test'
+            }
+            post {
+                always {
+                    junit '**/target/surefire-reports/*.xml'
+                }
             }
         }
 
         stage('Docker Build') {
             steps {
                 script {
-                    sh "docker build -t ${DOCKER_IMAGE}:${env.BUILD_ID} ."
-                    sh "docker tag ${DOCKER_IMAGE}:${env.BUILD_ID} ${DOCKER_IMAGE}:latest"
+                    try {
+                        sh "echo ${DOCKER_HUB_CREDS_PSW} | docker login -u ${DOCKER_HUB_CREDS_USR} --password-stdin"
+                        sh "docker build -t ${DOCKER_IMAGE}:${env.BUILD_NUMBER} ."
+                        sh "docker tag ${DOCKER_IMAGE}:${env.BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
+                    } catch (Exception e) {
+                        error "Docker build failed: ${e.message}"
+                    }
                 }
             }
         }
@@ -32,15 +60,29 @@ pipeline {
         stage('Docker Push') {
             steps {
                 script {
-                    sh "echo ${DOCKER_HUB_CREDS_PSW} | docker login -u ${DOCKER_HUB_CREDS_USR} --password-stdin"
-                    sh "docker push ${DOCKER_IMAGE}:${env.BUILD_ID}"
-                    sh "docker push ${DOCKER_IMAGE}:latest"
+                    try {
+                        sh "docker push ${DOCKER_IMAGE}:${env.BUILD_NUMBER}"
+                        sh "docker push ${DOCKER_IMAGE}:latest"
+                    } catch (Exception e) {
+                        error "Docker push failed: ${e.message}"
+                    }
                 }
             }
         }
-    }    post {
+    }
+
+    post {
         always {
-            sh "docker logout"
-            cleanWs()
+            script {
+                sh 'docker logout || true'
+                cleanWs()
+            }
         }
-    }}
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
+    }
+}
