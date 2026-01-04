@@ -2,53 +2,45 @@ pipeline {
     agent any
 
     environment {
-        // Define variables for reusability
-        DOCKER_IMAGE = "my-app-name"
-        DOCKER_TAG = "${env.BUILD_NUMBER}"
-        REGISTRY_USER = "blueasni"
+        // Replace with your Docker Hub username and repository name
+        DOCKER_IMAGE = "blueasni/repositoryplus"
+        DOCKER_HUB_CREDS = credentials('docker_secret')
     }
 
     stages {
         stage('Checkout') {
-            steps {
-                // Pulls code from your configured repository
+        steps {
                 checkout scm
             }
         }
 
         stage('Maven Build') {
             steps {
-                // Runs unit tests and packages the JAR file
-                sh 'mvn clean package -DskipTests'
+              sh 'mvn clean package -DskipTests'
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Docker Build') {
             steps {
                 script {
-                    // Builds the image using the Dockerfile in your root directory
-                    dockerImage = docker.build("${REGISTRY_USER}/${DOCKER_IMAGE}:${DOCKER_TAG}")
+                    sh "docker build -t ${DOCKER_IMAGE}:${env.BUILD_ID} ."
+                    sh "docker tag ${DOCKER_IMAGE}:${env.BUILD_ID} ${DOCKER_IMAGE}:latest"
                 }
             }
         }
 
-        stage('Push to Registry') {
+        stage('Docker Push') {
             steps {
                 script {
-                    // 'docker-hub-credentials' is the ID of your credentials in Jenkins
-                    docker.withRegistry('', 'docker-hub-credentials') {
-                        dockerImage.push()
-                        dockerImage.push("latest")
-                    }
+                    sh "echo ${DOCKER_HUB_CREDS_PSW} | docker login -u ${DOCKER_HUB_CREDS_USR} --password-stdin"
+                    sh "docker push ${DOCKER_IMAGE}:${env.BUILD_ID}"
+                    sh "docker push ${DOCKER_IMAGE}:latest"
                 }
             }
         }
-    }
-
-    post {
+    }    post {
         always {
-            // Clean up the workspace and local docker images to save space
-            sh "docker rmi ${REGISTRY_USER}/${DOCKER_IMAGE}:${DOCKER_TAG} || true"
+            sh "docker logout"
+            cleanWs()
         }
-    }
-}
+    }}
